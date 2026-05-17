@@ -96,4 +96,21 @@ void main() {
       expect(html, contains('<base href="about:blank">'));
     });
   });
+
+  group('Real file parsing', () {
+    test('should parse 1.mht successfully', () async {
+      const testPath = r'C:\Code\1.mht';
+      final file = File(testPath);
+      if (!await file.exists()) {
+        print('$testPath not found, skipping');
+        return;
+      }
+      final parser = await MhtParser.fromFile(file.path);
+      expect(parser.byteLength, greaterThan(0));
+      final html = parser.parseToHtml();
+      expect(html, isNotEmpty);
+      expect(html, isNot(contains('解析错误')));
+      print('Parsed HTML length: ${html.length}');
+    });
+  });
 }

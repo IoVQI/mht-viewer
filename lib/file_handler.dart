@@ -5,24 +5,34 @@ import 'package:file_picker/file_picker.dart';
 
 const _channel = MethodChannel('mht_viewer_app/file');
 
+/// Represents a single MHT file entry.
+class MhtFileInfo {
+  final String uri;
+  final String displayName;
+  const MhtFileInfo({required this.uri, required this.displayName});
+}
+
 /// Lists all .mht / .mhtml files in the given directory.
 ///
 /// For regular filesystem paths, uses `dart:io` [Directory].
 /// For `content://` URIs (Android SAF), delegates to the platform channel
 /// which uses [androidx.documentfile.provider.DocumentFile] for reliable
 /// document-tree traversal.
-Future<List<String>> listMhtFilesInDirectory(String dirPath) async {
+Future<List<MhtFileInfo>> listMhtFilesInDirectory(String dirPath) async {
   // Path 1: regular filesystem directory
   if (!_isContentUri(dirPath)) {
     try {
       final dir = Directory(dirPath);
       if (await dir.exists()) {
-        final files = <String>[];
+        final files = <MhtFileInfo>[];
         await for (final entity in dir.list(recursive: false)) {
           if (entity is File) {
             final name = entity.path.toLowerCase();
             if (name.endsWith('.mht') || name.endsWith('.mhtml')) {
-              files.add(entity.path);
+              files.add(MhtFileInfo(
+                uri: entity.path,
+                displayName: entity.uri.pathSegments.last,
+              ));
             }
           }
         }
@@ -38,11 +48,21 @@ Future<List<String>> listMhtFilesInDirectory(String dirPath) async {
   // Path 2: content:// URI or constructed tree URI from filesystem path
   final treeUri = _isContentUri(dirPath) ? dirPath : _pathToTreeUri(dirPath);
   try {
-    final uris = await _channel.invokeMethod('listMhtFiles', {
+    final result = await _channel.invokeMethod('listMhtFiles', {
       'uri': treeUri,
     });
-    if (uris is List && uris.isNotEmpty) {
-      return uris.map((u) => u.toString()).toList();
+    if (result is List && result.isNotEmpty) {
+      return result.map((item) {
+        if (item is Map) {
+          return MhtFileInfo(
+            uri: item['uri']?.toString() ?? '',
+            displayName: item['name']?.toString() ?? '',
+          );
+        }
+        // Backward compatibility: plain string URI
+        final uri = item.toString();
+        return MhtFileInfo(uri: uri, displayName: uri.split('/').last);
+      }).toList();
     }
   } catch (_) {}
 
@@ -58,7 +78,7 @@ Future<String?> pickRandomFromDirectory(String dirPath) async {
   if (files.isEmpty) return null;
 
   final randomIndex = Random().nextInt(files.length);
-  return ensureReadablePath(files[randomIndex]);
+  return ensureReadablePath(files[randomIndex].uri);
 }
 
 /// Opens the system directory picker and returns the path / URI string.
@@ -92,6 +112,19 @@ Future<void> requestManageStorage() async {
   try {
     await _channel.invokeMethod('requestManageStorage');
   } catch (_) {}
+}
+
+/// Converts a file from [charset] encoding to UTF-8 via the platform channel.
+/// Returns the path to the converted file, or null on failure.
+Future<String?> convertToUtf8(String pathOrUri, String charset) async {
+  try {
+    return await _channel.invokeMethod<String>('convertToUtf8', {
+      'uri': pathOrUri,
+      'charset': charset,
+    });
+  } catch (_) {
+    return null;
+  }
 }
 
 /// Converts a filesystem path to an Android document-tree URI suitable for

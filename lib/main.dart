@@ -547,7 +547,7 @@ class _HomePageState extends State<HomePage> {
 // =============================================================================
 
 class _FileListDialog extends StatelessWidget {
-  final List<String> files;
+  final List<MhtFileInfo> files;
 
   const _FileListDialog({required this.files});
 
@@ -561,16 +561,17 @@ class _FileListDialog extends StatelessWidget {
           shrinkWrap: true,
           itemCount: files.length,
           itemBuilder: (_, i) {
-            final fileName = Uri.decodeComponent(files[i].split('/').last);
-            final sub = files[i].length > 60
-                ? '...${Uri.decodeComponent(files[i].substring(files[i].length - 50))}'
-                : Uri.decodeComponent(files[i]);
+            final displayName = files[i].displayName;
+            final uri = files[i].uri;
+            final sub = uri.length > 60
+                ? '...${uri.substring(uri.length - 50)}'
+                : uri;
 
             return ListTile(
               leading: const Icon(Icons.description),
               title: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
-                child: Text(fileName),
+                child: Text(displayName),
               ),
               subtitle: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
@@ -579,7 +580,7 @@ class _FileListDialog extends StatelessWidget {
                   style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
                 ),
               ),
-              onTap: () => Navigator.pop(context, files[i]),
+              onTap: () => Navigator.pop(context, uri),
             );
           },
         ),

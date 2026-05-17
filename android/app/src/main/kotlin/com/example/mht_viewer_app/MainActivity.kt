@@ -33,6 +33,11 @@ class MainActivity : FlutterActivity() {
                             Environment.isExternalStorageManager()
                         else true
                     )
+                    "convertToUtf8" -> {
+                        val fileUri = call.argument<String>("uri") ?: ""
+                        val charset = call.argument<String>("charset") ?: "GBK"
+                        convertToUtf8(Uri.parse(fileUri), charset, result)
+                    }
                     "requestManageStorage" -> {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                             val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
@@ -55,15 +60,15 @@ class MainActivity : FlutterActivity() {
             }
 
             val children = rootDir.listFiles()
-            val mhtUris = children
+            val mhtFiles = children
                 .filter { f ->
                     val name = f.name?.lowercase() ?: ""
                     name.endsWith(".mht") || name.endsWith(".mhtml")
                 }
-                .map { it.uri.toString() }
+                .map { mapOf("uri" to it.uri.toString(), "name" to (it.name ?: "")) }
                 .toList()
 
-            result.success(mhtUris)
+            result.success(mhtFiles)
         } catch (e: Exception) {
             result.success(emptyList<String>())
         }
@@ -80,6 +85,22 @@ class MainActivity : FlutterActivity() {
                 result.error("READ_ERROR", "Cannot open input stream", null)
                 return
             }
+            result.success(tempFile.absolutePath)
+        } catch (e: Exception) {
+            result.error("READ_ERROR", e.message, null)
+        }
+    }
+
+    private fun convertToUtf8(fileUri: Uri, charset: String, result: MethodChannel.Result) {
+        try {
+            val bytes = contentResolver.openInputStream(fileUri)?.use { it.readBytes() }
+                ?: run {
+                    result.error("READ_ERROR", "Cannot open input stream", null)
+                    return
+                }
+            val text = String(bytes, charset(charset))
+            val tempFile = File(cacheDir, "mht_utf8_${System.currentTimeMillis()}.mht")
+            tempFile.writeBytes(text.toByteArray(Charsets.UTF_8))
             result.success(tempFile.absolutePath)
         } catch (e: Exception) {
             result.error("READ_ERROR", e.message, null)

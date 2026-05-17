@@ -1,5 +1,20 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
+
+import 'file_handler.dart';
+
+/// Top-level helper for [Isolate.run] — must be a top-level function.
+String _runParse(_ParsePayload payload) {
+  return MhtParser._(payload.bytes, payload.text).parseToHtml();
+}
+
+/// Simple payload carrying the data needed for isolate parsing.
+class _ParsePayload {
+  final List<int> bytes;
+  final String text;
+  const _ParsePayload(this.bytes, this.text);
+}
 
 /// Parses an MHT (MIME HTML / .mhtml) file and extracts HTML with inlined resources.
 class MhtParser {
@@ -7,6 +22,9 @@ class MhtParser {
   late final String _text;
 
   MhtParser._(this._bytes, this._text);
+
+  /// Byte size of the loaded file.
+  int get byteLength => _bytes.length;
 
   /// Creates an [MhtParser] from raw bytes (useful for testing).
   MhtParser.fromBytes(List<int> bytes)
@@ -22,16 +40,59 @@ class MhtParser {
   }
 
   /// Creates an [MhtParser] from a file path.
+  ///
+  /// Auto-detects encoding from MHT headers. If the file uses GBK/GB2312
+  /// encoding, it is converted to UTF-8 via the platform channel first.
   static Future<MhtParser> fromFile(String filePath) async {
-    final bytes = await File(filePath).readAsBytes();
-    // MHT files are typically ASCII-compatible; fall back to Latin-1 for binary safety.
+    var bytes = await File(filePath).readAsBytes();
     String text;
     try {
       text = utf8.decode(bytes);
     } catch (_) {
-      text = latin1.decode(bytes);
+      // Detect charset from MIME headers (ASCII-safe)
+      final charset = _detectCharset(bytes);
+      if (charset != null) {
+        final converted = await convertToUtf8(filePath, charset);
+        if (converted != null) {
+          bytes = await File(converted).readAsBytes();
+        }
+      }
+      try {
+        text = utf8.decode(bytes);
+      } catch (_) {
+        text = latin1.decode(bytes);
+      }
     }
     return MhtParser._(bytes, text);
+  }
+
+  /// Extracts the charset from MHT Content-Type headers.
+  /// The header section is ASCII, so Latin-1 decode is safe.
+  static String? _detectCharset(List<int> bytes) {
+    final head = latin1.decode(bytes.length > 4096 ? bytes.sublist(0, 4096) : bytes);
+    final match = RegExp(
+      r'Content-Type:.*?charset\s*=\s*"?([^";\s\n\r]+)',
+      caseSensitive: false,
+    ).firstMatch(head);
+    if (match == null) return null;
+    final charset = match.group(1)!.toLowerCase();
+    const gbkNames = ['gbk', 'gb2312', 'gb18030', 'gb_2312', 'gb_2312-80'];
+    return gbkNames.contains(charset) ? charset : null;
+  }
+
+  /// Parses MHT content on a background isolate to keep the UI responsive.
+  /// Use for files >2 MB.
+  static Future<String> parseInIsolate(List<int> bytes, String text) {
+    return Isolate.run(() => _runParse(_ParsePayload(bytes, text)));
+  }
+
+  /// Parses to HTML. Automatically uses a background isolate for files >2 MB
+  /// to avoid janking the UI thread.
+  Future<String> parseToHtmlAsync() {
+    if (_bytes.length > 2 * 1024 * 1024) {
+      return parseInIsolate(_bytes, _text);
+    }
+    return Future.value(parseToHtml());
   }
 
   /// Parses the MHT content and returns an HTML string with all resources
@@ -57,7 +118,9 @@ class MhtParser {
 
       if (parsed.contentType.contains('text/html') ||
           parsed.contentType.contains('text/htm')) {
-        htmlContent = parsed.body;
+        // Only keep the first (main) HTML part — later text/html parts are
+        // typically embedded iframes or sub-frames that lack meaningful content.
+        htmlContent ??= parsed.body;
       } else {
         final dataUri = parsed.toDataUri();
         if (parsed.contentLocation.isNotEmpty) {

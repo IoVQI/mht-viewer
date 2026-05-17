@@ -1,12 +1,12 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'mht_parser.dart';
 
 /// Displays a parsed MHT file in a full-screen WebView.
-///
-/// Shows a [CircularProgressIndicator] during parsing, then renders the HTML
-/// in a [WebViewWidget]. Includes an AppBar with the file name and a back
-/// button.
 class MhtViewerPage extends StatefulWidget {
   final String filePath;
 
@@ -20,21 +20,54 @@ class _MhtViewerPageState extends State<MhtViewerPage> {
   late final WebViewController _controller;
   bool _loading = true;
   String? _error;
+  String _statusText = '正在解析 MHT 文件...';
+  File? _tempFile;
+
+  static const _largeThreshold = 2 * 1024 * 1024; // 2 MB
 
   @override
   void initState() {
     super.initState();
     _controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted);
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageFinished: (_) {
+            if (mounted) setState(() => _loading = false);
+          },
+        ),
+      );
     _loadContent();
+  }
+
+  @override
+  void dispose() {
+    _tempFile?.delete();
+    super.dispose();
   }
 
   Future<void> _loadContent() async {
     try {
       final parser = await MhtParser.fromFile(widget.filePath);
-      final html = parser.parseToHtml();
-      await _controller.loadHtmlString(html, baseUrl: 'about:blank');
-      if (mounted) setState(() => _loading = false);
+      final isLarge = parser.byteLength > _largeThreshold;
+
+      if (isLarge) {
+        if (mounted) setState(() => _statusText = '正在后台解析大文件 (${(parser.byteLength / 1024 / 1024).toStringAsFixed(1)} MB)...');
+      }
+
+      final html = await parser.parseToHtmlAsync();
+
+      if (isLarge) {
+        // Use app cache dir (accessible to WebView) rather than system temp
+        final cacheDir = await getTemporaryDirectory();
+        _tempFile = File('${cacheDir.path}/mht_parsed.html');
+        await _tempFile!.writeAsString(html);
+        if (mounted) setState(() => _statusText = '正在加载页面...');
+        await _controller.loadFile(_tempFile!.path);
+      } else {
+        await _controller.loadHtmlString(html, baseUrl: 'about:blank');
+        if (mounted) setState(() => _loading = false);
+      }
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -66,13 +99,13 @@ class _MhtViewerPageState extends State<MhtViewerPage> {
 
   Widget _buildBody() {
     if (_loading) {
-      return const Center(
+      return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircularProgressIndicator(),
-            SizedBox(height: 16),
-            Text('正在解析 MHT 文件...'),
+            const CircularProgressIndicator(),
+            const SizedBox(height: 16),
+            Text(_statusText),
           ],
         ),
       );

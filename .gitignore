@@ -25,3 +25,10 @@ ios/.symlinks/
 # OS
 .DS_Store
 Thumbs.db
+
+# Test fixtures (may contain sensitive content)
+test/*.mht
+test/*.mhtml
+
+# APK archive (large binaries, kept locally)
+apk/

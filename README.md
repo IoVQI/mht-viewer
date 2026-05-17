@@ -7,6 +7,8 @@
 - 读取并解析 MHT (MIME HTML) 文件，提取 HTML 正文和内嵌资源（CSS、图片、字体等）
 - 所有资源自动转为 data: URI 内联，无需网络连接即可完整渲染
 - 支持 **quoted-printable** 和 **base64** 两种内容传输编码
+- 自动检测并转码 **GBK / GB2312 / GB18030** 编码的文件
+- 大文件（>2MB）在后台 isolate 解析，避免 UI 卡顿
 - 文件夹管理：保存常用文件夹、浏览文件列表、随机打开
 - 适配 Android 14+ Scoped Storage，通过 SAF (Storage Access Framework) 访问文件
 
@@ -47,11 +49,21 @@ flutter build apk --release
 
 APK 输出路径：`build/app/outputs/flutter-apk/`
 
+### 历史版本 APK
+
+构建产物按版本号本地归档在 `apk/` 目录下（该目录已加入 `.gitignore`，不上传到 Git）：
+
+```
+apk/mht-viewer-v<version>-<variant>.apk
+```
+
 ### 运行测试
 
 ```bash
 flutter test
 ```
+
+> 注意：`test/` 目录下的 `.mht` / `.mhtml` 文件已加入 `.gitignore`。测试套件使用代码内建的 `buildMht()` 辅助方法创建测试数据，无需外部文件。
 
 ## 使用说明
 

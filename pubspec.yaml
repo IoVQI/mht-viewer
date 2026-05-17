@@ -1,7 +1,7 @@
 name: mht_viewer_app
 description: 极简 MHT 文件查看器
 publish_to: none
-version: 1.0.1+2
+version: 1.0.2+3
 
 environment:
   sdk: ^3.6.0
