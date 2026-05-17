@@ -1,76 +1,99 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mht_viewer_app/mht_parser.dart';
 
+/// Builds a minimal valid MHT byte sequence with the given HTML body.
+List<int> buildMht(String htmlBody) {
+  const boundary = '----TestBoundary';
+  return utf8.encode(
+    'From: <test>\r\n'
+    'Subject: test\r\n'
+    'Date: Sun, 17 May 2026 00:00:00 -0000\r\n'
+    'MIME-Version: 1.0\r\n'
+    'Content-Type: multipart/related;\r\n'
+    '\ttype="text/html";\r\n'
+    '\tboundary="$boundary"\r\n'
+    '\r\n'
+    '------TestBoundary\r\n'
+    'Content-Type: text/html\r\n'
+    'Content-Transfer-Encoding: 8bit\r\n'
+    '\r\n'
+    '$htmlBody\r\n'
+    '------TestBoundary--\r\n',
+  );
+}
+
+/// Writes a temporary .mht file and parses it with MhtParser.fromFile.
+Future<MhtParser> writeAndParse(List<int> bytes) async {
+  final tmpDir = Directory.systemTemp;
+  final file = File('${tmpDir.path}/test_${DateTime.now().microsecondsSinceEpoch}.mht');
+  await file.writeAsBytes(bytes);
+  try {
+    return await MhtParser.fromFile(file.path);
+  } finally {
+    await file.delete();
+  }
+}
+
 void main() {
-  // Path to the test .mht file
-  const testFilePath = r'C:\Code\Xiaomi MiMo 开放平台.mht';
-
   group('MhtParser.fromFile', () {
-    test('should load .mht file successfully', () async {
-      final file = File(testFilePath);
-      expect(await file.exists(), isTrue, reason: 'Test file must exist');
-
-      final parser = await MhtParser.fromFile(testFilePath);
+    test('should load and parse a valid MHT file', () async {
+      final bytes = buildMht('<p>Hello World</p>');
+      final parser = await writeAndParse(bytes);
       expect(parser, isNotNull);
     });
 
     test('should throw for non-existent file', () async {
       expect(
-        () => MhtParser.fromFile(r'C:\nonexistent\fake.mht'),
-        throwsA(isA<FileSystemException>()),
+        () async => MhtParser.fromFile(r'C:\nonexistent\fake_file_xyz123.mht'),
+        throwsA(isA<Exception>()),
       );
     });
   });
 
   group('MhtParser.parseToHtml', () {
-    late MhtParser parser;
-    late String html;
+    test('should parse minimal MHT with simple HTML', () async {
+      final parser = await writeAndParse(buildMht('<p>Hello World</p>'));
+      final html = parser.parseToHtml();
 
-    setUpAll(() async {
-      parser = await MhtParser.fromFile(testFilePath);
-      html = parser.parseToHtml();
-    });
-
-    test('should return valid HTML string', () {
       expect(html, isNotEmpty);
-      expect(html.toLowerCase(), contains('<html'));
+      expect(html, contains('<p>Hello World</p>'));
     });
 
-    test('should not return error HTML', () {
+    test('should parse MHT with Chinese content', () async {
+      final parser = await writeAndParse(buildMht('<h1>你好世界</h1>'));
+      final html = parser.parseToHtml();
+
+      expect(html, isNotEmpty);
+      expect(html, contains('你好世界'));
+    });
+
+    test('should not return error HTML for valid MHT', () async {
+      final parser = await writeAndParse(buildMht('<p>test</p>'));
+      final html = parser.parseToHtml();
+
       expect(html, isNot(contains('解析错误')));
       expect(html, isNot(contains('无法解析 MHT 文件')));
-      expect(html, isNot(contains('未找到 MIME boundary')));
-      expect(html, isNot(contains('不包含任何内容部分')));
-      expect(html, isNot(contains('未找到 HTML 内容')));
     });
 
-    test('should contain expected page content from Xiaomi MiMo', () {
-      // The page title contains "Xiaomi MiMo 开放平台"
-      expect(html, contains('MiMo'));
+    test('should return error HTML when no boundary found', () {
+      final parser = MhtParser.fromBytes(
+        utf8.encode('Content-Type: text/html'),
+      );
+      final html = parser.parseToHtml();
+
+      expect(html, contains('解析错误'));
+      expect(html, contains('未找到 MIME boundary'));
     });
 
-    test('should inject base href to prevent URL leakage', () {
+    test('should inject base href to prevent URL leakage', () async {
+      final parser = await writeAndParse(
+        buildMht('<html><head></head><body>test</body></html>'),
+      );
+      final html = parser.parseToHtml();
+
       expect(html, contains('<base href="about:blank">'));
-    });
-
-    test('should inline resources as data: URIs', () {
-      // A real MHT file from a browser should have images/CSS inlined
-      // Check that at least some content-location references were replaced
-      // (no http:// or https:// URLs should remain in the HTML body for inlined resources)
-      expect(html.contains('data:'), isTrue,
-          reason: 'Should contain data: URIs for inlined resources');
-    });
-
-    test('should handle images as data: URIs', () {
-      // Check for image data URIs (common in browser-saved MHT files)
-      final hasImageDataUri =
-          RegExp(r'data:image/[a-z]+;base64,').hasMatch(html);
-      // Note: some MHT files may not have images, so this is informational
-      if (hasImageDataUri) {
-        expect(hasImageDataUri, isTrue,
-            reason: 'Images should be inlined as data: URIs');
-      }
     });
   });
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'file_handler.dart';
 import 'folder_store.dart';
 import 'mht_viewer.dart';
@@ -30,12 +31,20 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  bool _storagePermitted = true;
+
   @override
   void initState() {
     super.initState();
+    _checkPermissions();
     FolderStore.load().then((_) {
       if (mounted) setState(() {});
     });
+  }
+
+  Future<void> _checkPermissions() async {
+    final granted = await isManageStorageGranted();
+    if (mounted) setState(() => _storagePermitted = granted);
   }
 
   // -----------------------------------------------------------------------
@@ -179,9 +188,11 @@ class _HomePageState extends State<HomePage> {
   // -----------------------------------------------------------------------
 
   Future<void> _openTestFile() async {
-    const testPath = '/sdcard/test.mht';
+    final dir = await getApplicationDocumentsDirectory();
+    final testPath = '${dir.path}/test.mht';
+    if (!mounted) return;
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const MhtViewerPage(filePath: testPath)),
+      MaterialPageRoute(builder: (_) => MhtViewerPage(filePath: testPath)),
     );
   }
 
@@ -208,6 +219,60 @@ class _HomePageState extends State<HomePage> {
         const SnackBar(content: Text('该文件夹中没有 .mht 或 .mhtml 文件')),
       );
     }
+  }
+
+  // -----------------------------------------------------------------------
+  // Permissions
+  // -----------------------------------------------------------------------
+
+  Widget _buildStoragePermissionCard() {
+    return Card(
+      color: Colors.orange.shade50,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.warning_amber, color: Colors.orange.shade700, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '未授予"管理所有文件"权限',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: Colors.orange.shade900,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Android 14+ 需要此权限才能直接读取存储中的 .mht 文件。\n'
+              '不使用此权限也可通过"选择文件夹"浏览文件。',
+              style: TextStyle(fontSize: 13, color: Colors.orange.shade800),
+            ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.orange.shade600,
+                ),
+                onPressed: () async {
+                  await requestManageStorage();
+                  await Future.delayed(const Duration(seconds: 2));
+                  await _checkPermissions();
+                },
+                child: const Text('前往授权'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   // -----------------------------------------------------------------------
@@ -275,6 +340,8 @@ class _HomePageState extends State<HomePage> {
       body: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         children: [
+          // -- 存储权限提示 --
+          if (!_storagePermitted) _buildStoragePermissionCard(),
           // -- 已保存的文件夹 --
           _buildSavedFoldersSection(folders),
           const SizedBox(height: 24),
@@ -494,22 +561,23 @@ class _FileListDialog extends StatelessWidget {
           shrinkWrap: true,
           itemCount: files.length,
           itemBuilder: (_, i) {
-            final fileName = files[i].split('/').last;
+            final fileName = Uri.decodeComponent(files[i].split('/').last);
             final sub = files[i].length > 60
-                ? '...${files[i].substring(files[i].length - 50)}'
-                : files[i];
+                ? '...${Uri.decodeComponent(files[i].substring(files[i].length - 50))}'
+                : Uri.decodeComponent(files[i]);
 
             return ListTile(
               leading: const Icon(Icons.description),
-              title: Text(
-                fileName,
-                overflow: TextOverflow.ellipsis,
+              title: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Text(fileName),
               ),
-              subtitle: Text(
-                sub,
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+              subtitle: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Text(
+                  sub,
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                ),
               ),
               onTap: () => Navigator.pop(context, files[i]),
             );

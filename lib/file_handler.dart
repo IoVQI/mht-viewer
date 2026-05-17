@@ -28,20 +28,23 @@ Future<List<String>> listMhtFilesInDirectory(String dirPath) async {
         }
         if (files.isNotEmpty) return files;
       }
-    } catch (_) {}
+      // dir exists but no MHT files found → return empty
+      return [];
+    } catch (_) {
+      // Permission denied (scoped storage) — fall through to platform channel
+    }
   }
 
-  // Path 2: content:// URI — delegate to Android platform channel
-  if (_isContentUri(dirPath)) {
-    try {
-      final uris = await _channel.invokeMethod('listMhtFiles', {
-        'uri': dirPath,
-      });
-      if (uris is List) {
-        return uris.map((u) => u.toString()).toList();
-      }
-    } catch (_) {}
-  }
+  // Path 2: content:// URI or constructed tree URI from filesystem path
+  final treeUri = _isContentUri(dirPath) ? dirPath : _pathToTreeUri(dirPath);
+  try {
+    final uris = await _channel.invokeMethod('listMhtFiles', {
+      'uri': treeUri,
+    });
+    if (uris is List && uris.isNotEmpty) {
+      return uris.map((u) => u.toString()).toList();
+    }
+  } catch (_) {}
 
   return [];
 }
@@ -74,6 +77,51 @@ Future<String> ensureReadablePath(String pathOrUri) async {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Returns true if [MANAGE_EXTERNAL_STORAGE] is granted.
+Future<bool> isManageStorageGranted() async {
+  try {
+    return await _channel.invokeMethod<bool>('isManageStorageGranted') ?? false;
+  } catch (_) {
+    return false;
+  }
+}
+
+/// Opens the system settings page for granting [MANAGE_EXTERNAL_STORAGE].
+Future<void> requestManageStorage() async {
+  try {
+    await _channel.invokeMethod('requestManageStorage');
+  } catch (_) {}
+}
+
+/// Converts a filesystem path to an Android document-tree URI suitable for
+/// the platform channel's `listMhtFiles` method.
+String _pathToTreeUri(String path) {
+  // Normalise: strip trailing slash, map /sdcard/ → /storage/emulated/0/
+  var normalised = path.endsWith('/') ? path.substring(0, path.length - 1) : path;
+  if (normalised == '/sdcard' || normalised.startsWith('/sdcard/')) {
+    normalised = '/storage/emulated/0${normalised.substring(7)}';
+  }
+
+  // Extract the relative path after the primary storage root
+  const roots = ['/storage/emulated/0/', '/storage/emulated/0', '/storage/sdcard0/'];
+  String? relative;
+  for (final root in roots) {
+    if (normalised == root.substring(0, root.length - 1)) {
+      relative = '';
+      break;
+    }
+    if (normalised.startsWith(root)) {
+      relative = normalised.substring(root.length);
+      break;
+    }
+  }
+  if (relative == null) return path; // unknown root
+
+  // Encode as primary%3A<path> (standard Android tree URI format)
+  final encoded = Uri.encodeComponent('primary:$relative').replaceAll('%2F', '/');
+  return 'content://com.android.externalstorage.documents/tree/$encoded';
+}
 
 bool _isContentUri(String path) => path.startsWith('content://');
 

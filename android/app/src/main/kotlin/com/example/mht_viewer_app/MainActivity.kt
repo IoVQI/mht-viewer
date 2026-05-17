@@ -1,6 +1,10 @@
 package com.example.mht_viewer_app
 
+import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.Settings
 import androidx.documentfile.provider.DocumentFile
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -23,6 +27,19 @@ class MainActivity : FlutterActivity() {
                     "readFile" -> {
                         val fileUri = call.argument<String>("uri") ?: ""
                         readFileToCache(Uri.parse(fileUri), result)
+                    }
+                    "isManageStorageGranted" -> result.success(
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+                            Environment.isExternalStorageManager()
+                        else true
+                    )
+                    "requestManageStorage" -> {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+                            intent.data = Uri.parse("package:${packageName}")
+                            startActivity(intent)
+                        }
+                        result.success(null)
                     }
                     else -> result.notImplemented()
                 }

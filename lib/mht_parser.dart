@@ -8,6 +8,19 @@ class MhtParser {
 
   MhtParser._(this._bytes, this._text);
 
+  /// Creates an [MhtParser] from raw bytes (useful for testing).
+  MhtParser.fromBytes(List<int> bytes)
+      : _bytes = bytes,
+        _text = _decodeBytes(bytes);
+
+  static String _decodeBytes(List<int> bytes) {
+    try {
+      return utf8.decode(bytes);
+    } catch (_) {
+      return latin1.decode(bytes);
+    }
+  }
+
   /// Creates an [MhtParser] from a file path.
   static Future<MhtParser> fromFile(String filePath) async {
     final bytes = await File(filePath).readAsBytes();
@@ -272,6 +285,9 @@ class _ParsedPart {
       final normalized = rawBody.replaceAll(RegExp(r'\s+'), '');
       return 'data:$contentType;base64,$normalized';
     }
+    if (contentTransferEncoding.toLowerCase() == 'quoted-printable') {
+      return 'data:$contentType;base64,${base64Encode(utf8.encode(body))}';
+    }
     // Encode raw bytes as base64 for binary safety
     return 'data:$contentType;base64,${base64Encode(rawBytes)}';
   }
@@ -283,11 +299,17 @@ class _ParsedPart {
     // Soft line breaks
     result = result.replaceAll('=\r\n', '');
     result = result.replaceAll('=\n', '');
-    // =XX hex decoding
+    // =XX hex decoding: each =XX becomes the corresponding byte
     result = result.replaceAllMapped(
       RegExp(r'=([0-9A-Fa-f]{2})'),
       (m) => String.fromCharCode(int.parse(m.group(1)!, radix: 16)),
     );
-    return result;
+    // The decoded string is a Latin-1 representation of a UTF-8 byte sequence.
+    // Convert Latin-1 chars → raw bytes → decode as UTF-8.
+    try {
+      return utf8.decode(latin1.encode(result));
+    } catch (_) {
+      return result;
+    }
   }
 }
